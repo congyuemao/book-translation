@@ -3,9 +3,9 @@ name: book-translation
 description: >
   整本书的 AI 翻译全流程：核对原文 Markdown → 建多语专有名词总表（人名、地名、著作、机构、术语）→ 逐章翻译 →
   引文核查（已有中译本的引用直接取中译原文，没有的回查原文再译，查不到的标【原文待核】并记台账）→ 润色去翻译腔 →
-  合并全书 → 翻译封面 → 合成带目录和书签的 PDF。支持英语和其他语言译成中文，长篇可跨多个会话接力。
+  合并全书 → 封面（生图模型汉化原封面，或模型手搓重新设计）→ 合成带目录和书签的 PDF。支持英语和其他语言译成中文，长篇可跨多个会话接力。
   只要用户要翻译一本书、一部长篇、论文集或书的若干章，或者手上有书的 PDF、扫描件、EPUB、HTML 想做成中文版，
-  或者在做这个流程中的某一段（"整理原文 MD""做术语表/专名表/译名表""逐章翻""核引文""把译稿润色一下""把译稿合成 PDF""翻译封面"），
+  或者在做这个流程中的某一段（"整理原文 MD""做术语表/专名表/译名表""逐章翻""核引文""把译稿润色一下""把译稿合成 PDF""翻译封面""封面汉化""重新设计封面""手搓封面"），
   都应使用本 skill，即使用户没有说"skill"也没有说全流程。Use for "translate this book", book-length translation,
   glossary building, citation checking and typesetting a translated book. 单段文字翻译、短文润色、与书籍无关的 PDF 处理不用本 skill。
 ---
@@ -24,7 +24,7 @@ description: >
 | 3 逐章翻译 | 先试译定调，再逐章译成 MD | `zh/*.md` | [translation.md](references/translation.md) |
 | 4 引文核查 | 按台账逐条查引文，分轮推进 | `audit/citations.json`、`audit/rounds/` | [citation-audit.md](references/citation-audit.md) |
 | 5 润色 | 拆长句，去翻译腔，换中文说法，不丢信息 | `zh/*.md`、`polish/` | [polish.md](references/polish.md) |
-| 6 合成 | 合并全书，翻译封面，生成 PDF 并校验 | `build/` | [assembly.md](references/assembly.md) |
+| 6 合成 | 合并全书，做封面（生图模型汉化原封面，或模型手搓重新设计），生成 PDF 并校验 | `build/` | [assembly.md](references/assembly.md) |
 
 用户可能只要其中一段（比如只要润色，或只要合 PDF）。这时不必从头走，读对应的说明，把缺的前置文件补到够用就行。手上是已有的译稿、没有段落锚点时，`style`、`audit-scan`、`polish-start`、`polish-check` 和合成脚本都能直接用（按空行分段）；`check` 要对照原文，需要原文和译文有相同的锚点。
 
@@ -54,6 +54,7 @@ python <skill>/scripts/booktool.py inspect 原书.pdf
 - 原文语言和目标语言（默认简体中文）；
 - 体裁：学术或非虚构、小说、其他（影响译文语气和引文核查强度）；
 - 成品（默认带注释的完整版 PDF，外加 HTML；可加无引注阅读版）；
+- 封面（默认：有清晰的原封面就用生图模型汉化，否则由模型手搓重新设计，不调用生图模型）；
 - 用户的偏好，比如有没有指定的参考译本、角色语气、是否允许重写笑话。
 
 然后初始化项目目录。书名页上的副标题写进 `project.json` 的 `subtitle_source`、`subtitle_zh`：
