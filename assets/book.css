@@ -1,0 +1,81 @@
+/* 默认书籍版式（改编自《天命》排印版）。复制到项目根目录即可覆盖。页面尺寸和书眉由 build_book.mjs 按 project.json 生成。 */
+:root{
+  --ink:#162e3b;--text:#252d32;--muted:#56636a;--accent:#b44230;--paper:#fcfaf5;--line:#cfd5d5;
+  --serif:BookSerif,'Noto Serif SC','Source Han Serif SC','Songti SC','SimSun',serif;
+  --sans:BookSans,'Noto Sans SC','Source Han Sans SC','PingFang SC','Microsoft YaHei',sans-serif;
+}
+*{box-sizing:border-box}
+html{color:var(--text);font-family:var(--serif);font-size:10.5pt;line-height:1.82}
+body{margin:0;background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+a{color:inherit;text-decoration:none}
+p{margin:0 0 .8em;text-align:justify;widows:2;orphans:2}
+h1,h2,h3,h4{font-family:var(--sans);font-weight:650;color:var(--ink);line-height:1.4;break-after:avoid}
+strong,b{font-weight:750}
+@page{margin:18mm 17mm 19mm 19mm}
+
+.cover-page{page:cover;position:relative;overflow:hidden;break-after:page}
+.cover-image img{display:block;width:100%;height:100%;object-fit:cover}
+.back-cover{break-before:page;break-after:auto}
+.cover-text{background:var(--ink);color:var(--paper);padding:30mm 17mm;display:flex;flex-direction:column}
+.cover-title{font:800 40pt/1.25 var(--sans);letter-spacing:.03em}
+.cover-subtitle{font:500 15pt/1.5 var(--sans);margin-top:5mm}
+.cover-author{font:500 13pt/1.5 var(--sans);margin-top:10mm}
+.cover-original{font:400 10pt/1.5 var(--sans);margin-top:auto;opacity:.75}
+
+.edition-page{page:front;break-after:page;padding-top:12mm;font-size:9.4pt}
+.edition-page h1{font-size:24pt;margin:0 0 6mm}
+.edition-rule{height:1.3mm;width:15mm;background:var(--accent);margin-bottom:8mm}
+.edition-meta{font:500 9pt/1.5 var(--sans);color:var(--muted);text-align:left}
+
+.toc-page{page:front;break-after:page}
+.toc-page h1{font-size:24pt;margin:2mm 0 5mm}
+.toc-page ol{list-style:none;margin:0;padding:0}
+.toc-page li{border-bottom:.18mm solid var(--line);break-inside:avoid}
+.toc-page li a{display:flex;justify-content:space-between;gap:4mm;padding:.8mm 0;font:450 8.9pt/1.4 var(--sans);color:var(--ink)}
+.toc-number{color:var(--accent);margin-right:2.5mm}
+.toc-pg{color:var(--muted);font-variant-numeric:tabular-nums}
+
+.book-section{break-before:page}
+.chapter-opener{padding-top:10mm;margin-bottom:9mm;break-inside:avoid;break-after:avoid}
+.chapter-opener h1{margin:0;font-size:23pt;font-weight:700}
+.chapter-number{display:block;font:500 10pt/1.4 var(--sans);color:var(--muted);margin-bottom:3mm;letter-spacing:.08em}
+.opener-rule{height:1.3mm;width:14mm;background:var(--accent);margin-top:7mm}
+.chapter-body h2{font-size:14pt;margin:8mm 0 3mm}
+.chapter-body h3{font-size:11.5pt;margin:6mm 0 2.5mm}
+.chapter-body h4{font-size:10.5pt;margin:5mm 0 2mm}
+.chapter-body p{overflow-wrap:anywhere;line-break:strict}
+.chapter-body a:not(.note-ref){text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+.chapter-body ol,.chapter-body ul{padding-left:1.7em}
+.chapter-body li{margin-bottom:.45em;overflow-wrap:anywhere}
+.chapter-body blockquote{margin:5mm 0;padding-left:5mm;border-left:.7mm solid var(--line)}
+.chapter-body table{border-collapse:collapse;width:100%;font-size:9pt}
+.chapter-body th,.chapter-body td{padding:2mm;border-bottom:.2mm solid var(--line)}
+.chapter-body img{max-width:100%;height:auto}
+.note-ref{font-family:var(--sans);font-size:.7em;font-weight:600;color:var(--accent);vertical-align:super;line-height:0;white-space:nowrap}
+.editor-note{font-family:var(--sans);font-size:.82em;color:#934b35}
+.section-break{text-align:center;color:var(--accent);margin:6mm 0}
+.endnotes{margin-top:10mm;font-size:8.4pt;line-height:1.68;color:#404b52}
+.endnotes h2{font-size:11pt;letter-spacing:.08em;padding-top:4mm;border-top:.5mm solid var(--ink);margin:0 0 4mm}
+.endnotes ol{padding-left:6mm;margin-top:0}
+.endnotes li{margin-bottom:2.1mm;text-align:justify;overflow-wrap:anywhere}
+.endnotes li::marker{font-family:var(--sans);font-size:7.5pt;color:var(--accent);font-weight:600}
+.endnotes li p{margin:0}
+
+@media screen{
+  html{background:#e9edeb;font-size:17px}
+  #book{max-width:820px;margin:0 auto;background:var(--paper)}
+  .cover-page{width:100%!important;height:auto!important;aspect-ratio:160/230}
+  .cover-text{padding:12% 10%}
+  .edition-page,.toc-page,.book-section{padding:56px 10%;border-bottom:1px solid var(--line)}
+  .endnotes{font-size:14px}
+  .endnotes h2{font-size:18px}
+  .toc-page li a{font-size:16px;padding:11px 0}
+  .toc-pg{display:none}
+  .note-ref{scroll-margin-top:24px}
+  .endnotes li:target{background:#f5e6d7}
+}
+@media screen and (max-width:600px){
+  html{font-size:16px}
+  .edition-page,.toc-page,.book-section{padding:40px 22px}
+  .chapter-opener h1{font-size:27px}
+}

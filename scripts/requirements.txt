@@ -1,0 +1,4 @@
+pypdf>=6.10
+fonttools>=4.55
+brotli>=1.1
+pypdfium2>=4.30  # 可选：把 PDF 页转成图片做目视检查
