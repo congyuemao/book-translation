@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // 把 zh/*.md 合成单文件 HTML 和带目录、书签的 PDF。
-// 用法：node build_book.mjs <项目目录> [--reading]
+// 用法：node build_book.mjs <项目目录>           出两份 PDF：带注释的完整版和无注释阅读版
+//       node build_book.mjs <项目目录> --full    只出完整版（调版面时省时间）
+//       node build_book.mjs <项目目录> --reading 只出阅读版
 // 环境变量：BROWSER_PATH、PYTHON、NODE_PATH、CODEX_RUNTIME_DIR、BOOK_FONT_DIR、BOOK_NO_FONT_SUBSET。
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -12,10 +14,22 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const skillDir = path.resolve(scriptDir, '..');
 const args = process.argv.slice(2);
-const reading = args.includes('--reading');
+const fullOnly = args.includes('--full');
+const reading = args.includes('--reading') && !fullOnly;
 const projectArg = args.find(a => !a.startsWith('--'));
-if (!projectArg) fail('用法：node build_book.mjs <项目目录> [--reading]');
+if (!projectArg) fail('用法：node build_book.mjs <项目目录> [--full | --reading]');
 const root = path.resolve(projectArg);
+if (!reading && !fullOnly) {
+  // 默认交付两份 PDF，各跑一遍，任何一份失败都算失败。
+  const results = ['--full', '--reading'].map(flag =>
+    spawnSync(process.execPath, [process.argv[1], root, flag], { stdio: 'inherit' }).status);
+  if (results.some(code => code !== 0)) {
+    console.error(`有版本没有通过：完整版退出码 ${results[0]}，阅读版退出码 ${results[1]}`);
+    process.exit(1);
+  }
+  console.log('两份 PDF 都已生成并通过校验：完整版和阅读版。');
+  process.exit(0);
+}
 const projectPath = path.join(root, 'project.json');
 if (!fs.existsSync(projectPath)) fail(`找不到 ${projectPath}`);
 const project = JSON.parse(fs.readFileSync(projectPath, 'utf8').replace(/^﻿/, ''));
@@ -95,6 +109,10 @@ const zhDir = path.join(root, 'zh');
 const removedEchoes = [];
 const chapterFiles = fs.readdirSync(zhDir).filter(n => n.endsWith('.md')).sort();
 if (!chapterFiles.length) fail(`${zhDir} 里没有章节`);
+// 全书中文 MD 随成品保留。合并文件有人工修改还没写回时，merge 会拒绝，这里就停下，免得用旧稿出书。
+const mergeRun = spawnSync(python[0], [...python.slice(1), path.join(scriptDir, 'booktool.py'), 'merge', root],
+  { encoding: 'utf8', env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+if (mergeRun.status !== 0) fail(`${mergeRun.stdout}${mergeRun.stderr}`);
 const titleKey = s => s.replace(/^#{1,6}\s*/, '').replace(/^第\s*[\d一二三四五六七八九十百]+\s*章\s*/, '').replace(/^\d+\s*[.、．]\s*/, '').replace(/\s+/g, '').trim();
 const chapters = chapterFiles.map((file, index) => {
   const bytes = fs.readFileSync(path.join(zhDir, file));
@@ -123,15 +141,32 @@ let audit = null;
 if (fs.existsSync(ledgerPath)) {
   const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8').replace(/^﻿/, ''));
   const records = ledger.records || [];
-  const expected = records.reduce((n, r) => n + (['partial', 'searched_unresolved'].includes(r.status) || (r.status === 'not_reviewed' && r.has_marker) ? (r.markers || 1) : 0), 0);
+  const expected = records.reduce((n, r) => n + (['partial', 'searched_unresolved'].includes(r.status) || (r.status === 'not_reviewed' && r.has_marker) ? (r.markers ?? 1) : 0), 0);
   if (records.length && expected !== pendingTotal) throw new Error(`台账应有 ${expected} 处待核，正文有 ${pendingTotal} 处。先运行 audit-check。`);
   const counts = {};
   for (const r of records) counts[r.status] = (counts[r.status] || 0) + 1;
   audit = { round: ledger.round, records: records.length, statuses: counts };
 }
 
+// ---------- 阅读版去掉译者写的说明 ----------
+// 标题要完全相同才算，作者自己的“读者说明”等不受影响。其他文件写进 build.reading_exclude（文件名前缀或标题）。
+const TRANSLATOR_TITLE = /^(译者(说明|前言|序|序言|的话|附记|后记|导言|按语)|译后记|译序|译本说明|翻译说明|校译说明|校注说明|校者说明)$/;
+const readingExcluded = [];
+if (reading) {
+  const extra = build.reading_exclude || [];
+  for (let i = chapters.length - 1; i >= 0; i--) {
+    const c = chapters[i];
+    if (TRANSLATOR_TITLE.test(c.title) || extra.some(x => c.file.startsWith(x) || c.title === x)) {
+      readingExcluded.unshift(c.file);
+      chapters.splice(i, 1);
+    }
+  }
+  if (!chapters.length) throw new Error('阅读版没有剩下任何章节，检查 build.reading_exclude');
+}
+
 // ---------- 渲染章节 ----------
 const expectBlocks = [];
+const noteCrossRefs = [];
 function renderChapter(c) {
   const parts = c.body.split(NOTES_HEADING);
   if (parts.length > 2) throw new Error(`${c.file} 有多个注释区`);
@@ -140,6 +175,7 @@ function renderChapter(c) {
   let notesHtml = '';
   if (reading) {
     prose = prose.replace(NOTE_REF, '').replaceAll(PENDING, '');
+    for (const m of prose.matchAll(/[见参]注\s*\d+|注释\s*\d+|第\s*\d+\s*条注|译者说明|校注/g)) noteCrossRefs.push(`${c.file}：${m[0]}`);
   } else {
     prose = prose.replace(NOTE_REF, (match, a, b) => `\u2060<a class="note-ref" id="ref-${c.id}-${a || b}" href="#note-${c.id}-${a || b}">[${a || b}]</a>`);
     if (parts.length === 2) {
@@ -183,12 +219,23 @@ function coverHtml() {
   return `<section class="cover-page cover-text" id="cover"><div class="cover-title">${escapeHtml(project.title_zh || project.title_source)}</div>${project.subtitle_zh ? `<div class="cover-subtitle">${escapeHtml(project.subtitle_zh)}</div>` : ''}<div class="cover-author">${escapeHtml(project.author_zh || project.author_source || '')}</div><div class="cover-original">${escapeHtml(project.title_source || '')}</div></section>`;
 }
 const coverSection = coverHtml();
-const backImage = findCoverImage('back');
-const backSection = backImage ? `<section class="cover-page cover-image back-cover"><img src="${imageData(backImage)}" alt="封底"></section>` : '';
+let backKind = 'none';
+function backHtml() {
+  const html = path.join(coverDir, 'back.html');
+  if (fs.existsSync(html)) {
+    const fragment = fs.readFileSync(html, 'utf8');
+    if (!fragment.includes('back-cover')) throw new Error('cover/back.html 最外层要写 <section class="cover-page back-cover" id="back-cover">');
+    backKind = 'html';
+    return fragment;
+  }
+  const image = findCoverImage('back');
+  if (!image) return '';
+  backKind = 'image';
+  return `<section class="cover-page cover-image back-cover" id="back-cover"><img src="${imageData(image)}" alt="封底"></section>`;
+}
+const backSection = backHtml();
 const title = project.title_zh || project.title_source;
-const defaultNote = reading
-  ? '本版为无引注阅读版，省略了注释、注号和“原文待核”标记。查证请看完整版。'
-  : `正文或注释中的“${PENDING}”表示该处引文或出处尚未落实。`;
+const defaultNote = `正文或注释中的“${PENDING}”表示该处引文或出处尚未落实。`;
 const editionSection = `<section class="edition-page" id="edition"><h1>${escapeHtml(title)}</h1>${project.subtitle_zh ? `<p class="edition-meta">${escapeHtml(project.subtitle_zh)}</p>` : ''}<div class="edition-rule"></div>
 <p class="edition-meta">${escapeHtml(project.title_source || '')}${project.author_source ? ' · ' + escapeHtml(project.author_source) : ''}</p>
 <p>${escapeHtml(build.edition_note || '')}</p><p>${escapeHtml(defaultNote)}</p><p>原书版权归原作者及权利方所有。</p></section>`;
@@ -203,7 +250,7 @@ function makeHtml(pageMap) {
 @page front{@top-center{content:''}@bottom-center{content:''}}
 .cover-page{width:${w}mm;height:${h}mm}`;
   return `<!doctype html><html lang="zh-Hans"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>${fontCss}\n${css}\n${pageCss}</style></head><body><main id="book">
-${coverSection}${editionSection}
+${coverSection}${reading ? '' : editionSection}
 <section class="toc-page" id="book-toc"><h1>目录</h1><ol>${toc}</ol></section>
 ${renderedChapters.join('\n')}
 ${backSection}</main></body></html>`;
@@ -226,7 +273,7 @@ function fontFaces() {
     ['BookSans', findFont(['NotoSansSC-VF.ttf', 'NotoSansSC[wght].ttf', 'NotoSansSC-Regular.ttf']), '100 900']];
   if (sources.some(s => !s[1])) { fontNote.reason = '找不到 Noto Serif SC / Noto Sans SC'; return ''; }
   const text = [...new Set([project.title_zh, project.subtitle_zh, project.author_zh, project.title_source, project.author_source, build.edition_note, build.running_head, defaultNote,
-    '封面目录原书版权归原作者及权利方所有注释与引用第章阅读版', ...chapters.map(c => c.title + c.body), coverKind === 'html' ? coverSection : ''].filter(Boolean).join(''))].join('');
+    '封面目录原书版权归原作者及权利方所有注释与引用第章阅读版', ...chapters.map(c => c.title + c.body), coverKind === 'html' ? coverSection : '', backKind === 'html' ? backSection : ''].filter(Boolean).join(''))].join('');
   const key = createHash('sha256').update(text).digest('hex').slice(0, 16);
   const textPath = path.join(tempDir, `chars-${key}.txt`);
   fs.writeFileSync(textPath, text, 'utf8');
@@ -274,7 +321,8 @@ try {
       const ids = [...document.querySelectorAll('[id]')].map(e => e.id);
       if (new Set(ids).size !== ids.length) errors.push('HTML id 重复');
       for (const a of document.querySelectorAll('a[href^="#"]')) if (!document.getElementById(a.hash.slice(1))) errors.push(`断开的链接 ${a.hash}`);
-      return { errors, noteRefs: document.querySelectorAll('.note-ref').length, endnotes: document.querySelectorAll('.endnotes ol > li').length, pendingMarkers: document.querySelectorAll('.editor-note').length };
+      const bodyText = [...document.querySelectorAll('.chapter-body')].map(e => e.textContent).join('');
+      return { errors, residualRefs: (bodyText.match(/\[\d+\]|〔\d+〕/g) || []).length, noteRefs: document.querySelectorAll('.note-ref').length, endnotes: document.querySelectorAll('.endnotes ol > li').length, pendingMarkers: document.querySelectorAll('.editor-note').length };
     });
     if (dom.errors.length) throw new Error(`HTML 校验失败：${JSON.stringify(dom.errors.slice(0, 20))}`);
     await page.pdf({ path: draftPath, printBackground: true, preferCSSPageSize: true, tagged: true, outline: true });
@@ -284,12 +332,13 @@ try {
     pageMap = next;
   }
   if (!stable) throw new Error('目录页码四轮内没有稳定。');
-  const outline = [{ title: '封面', page: 1 }, { title: '目录', page: pageMap['book-toc'] }, ...chapters.map(c => ({ title: c.title, page: pageMap[c.id] }))];
+  const outline = [{ title: '封面', page: 1 }, { title: '目录', page: pageMap['book-toc'] }, ...chapters.map(c => ({ title: c.title, page: pageMap[c.id] })), ...(backKind === 'none' ? [] : [{ title: '封底', page: -1 }])];
   const configPath = path.join(tempDir, 'finalize.json');
   fs.writeFileSync(configPath, JSON.stringify({
     outline,
     metadata: { '/Title': title, '/Author': project.author_zh || project.author_source || '', '/Subject': reading ? '中文译本（阅读版）' : '中文译本', '/Creator': 'book-translation skill' },
     expectBlocks,
+    hasBackCover: backKind !== 'none',
   }));
   const report = runPython(['finalize', draftPath, pdfPath, configPath]);
   const problems = [];
@@ -300,24 +349,28 @@ try {
   if (!reading && dom.noteRefs !== dom.endnotes) problems.push(`注号 ${dom.noteRefs} 个，注释 ${dom.endnotes} 条`);
   if (!reading && dom.pendingMarkers !== pendingTotal) problems.push('HTML 中的待核标记数量不对');
   if (reading && report.pendingMarkersInPdf) problems.push('阅读版里还有待核标记');
+  if (reading && dom.endnotes) problems.push('阅读版里还有注释');
+  if (reading && dom.residualRefs) problems.push(`阅读版正文还有 ${dom.residualRefs} 处注号`);
   await page.emulateMedia({ media: 'screen' });
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
   if (mobileOverflow) problems.push('HTML 在手机宽度下横向溢出');
   const warnings = [];
+  if (backKind === 'none') warnings.push('没有封底（cover/back.html 或 cover/back.png）');
+  if (noteCrossRefs.length) warnings.push(`阅读版去掉了注释和译者说明，这些地方还在提到它们，请改写：${noteCrossRefs.slice(0, 10).join('；')}`);
   if (audit?.statuses?.not_reviewed) warnings.push(`台账还有 ${audit.statuses.not_reviewed} 条引文没有核查`);
   if (!fontNote.embedded) warnings.push(`未嵌入字体子集（${fontNote.reason}）：HTML 依赖本机字体`);
   if (report.radicalCharsInPdfText) warnings.push(`PDF 文字层有 ${report.radicalCharsInPdfText} 个部首码位，复制和搜索可能对不上。装 fonttools 和 Noto SC 字体后重建可解决`);
   const validation = {
     status: problems.length ? 'failed' : 'passed', problems, warnings, fontSubset: fontNote, edition: reading ? 'reading' : 'full', ...report,
     chapters: chapters.length, noteRefs: dom.noteRefs, endnotes: dom.endnotes, pendingMarkers: reading ? 0 : pendingTotal,
-    paginationPasses: passes, cover: coverKind, environment: { ...environment, browser: executablePath }, citationAudit: audit, removedTitleEchoes: removedEchoes,
+    readingExcluded, paginationPasses: passes, cover: coverKind, backCover: backKind, environment: { ...environment, browser: executablePath }, citationAudit: audit, removedTitleEchoes: removedEchoes,
     pageMap, chapterHashes: Object.fromEntries(chapters.map(c => [c.file, c.sha256])),
-    pdf: path.basename(pdfPath), html: path.basename(htmlPath), builtAt: new Date().toISOString(),
+    pdf: path.basename(pdfPath), html: path.basename(htmlPath), mergedMarkdown: 'zh_merged/book_zh.md', builtAt: new Date().toISOString(),
     visualInspection: '脚本不做目视检查，见 references/assembly.md',
   };
   fs.writeFileSync(path.join(outDir, `validation${editionSuffix}.json`), JSON.stringify(validation, null, 2) + '\n');
-  console.log(JSON.stringify({ status: validation.status, problems, warnings, pdf: pdfPath, html: htmlPath, pages: report.pages, chapters: chapters.length, bookmarks: report.bookmarks, noteRefs: dom.noteRefs, pendingMarkers: validation.pendingMarkers, cover: coverKind }, null, 2));
+  console.log(JSON.stringify({ status: validation.status, problems, warnings, pdf: pdfPath, html: htmlPath, mergedMarkdown: path.join(root, 'zh_merged/book_zh.md'), pages: report.pages, chapters: chapters.length, bookmarks: report.bookmarks, noteRefs: dom.noteRefs, pendingMarkers: validation.pendingMarkers, cover: coverKind }, null, 2));
   if (problems.length) exitCode = 1;
 } finally {
   await browser.close();

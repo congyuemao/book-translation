@@ -1,4 +1,4 @@
-# 阶段 6：合并、封面、PDF
+# 阶段 6：合并、封面、封底、两份 PDF
 
 ## 合成前检查
 
@@ -9,15 +9,40 @@ python <skill>/scripts/booktool.py audit-check . --final
 
 `build_book.mjs` 还会自己卡几项：每章必须有且只有一个一级标题；注释号要能对上；正文不能残留"校注：""译者注："；`【原文待核】` 的数量要和台账一致。
 
+## 中文 MD
+
+合成脚本每次都会先把 `zh/` 合并成 `zh_merged/book_zh.md`，也可以单独运行：
+
+```bash
+python <skill>/scripts/booktool.py merge .
+```
+
+**逐章的 `zh/*.md` 和合并的 `zh_merged/book_zh.md` 都要保留并交给用户**，以后人工修改靠它们。两个文件夹都要纳入 git，不要放进 `build/`。
+
+书前书后的文件和正文一样，都放在 `zh/` 里。锚点和 `<!--file:...-->` 标记都是 HTML 注释，不会进入成品，人工修改时不要动它们。
+
+## 后续人工修改
+
+1. **改逐章文件**：直接改 `zh/*.md`，然后重新合成。合并文件会自动更新。
+2. **改合并文件**：直接改 `zh_merged/book_zh.md`，先写回，再合成：
+
+   ```bash
+   python <skill>/scripts/booktool.py unmerge .
+   ```
+
+3. 改完跑 `check` 和 `audit-check`，再运行 `build_book.mjs`。不要直接改 PDF 或 HTML，下次合成就没了。
+
+保护规则：合并文件有人工修改还没写回时，`merge` 和合成脚本都会拒绝运行，不会覆盖这些修改。合并文件和逐章文件的同一章都改过时，`unmerge` 会报错，一个文件都不写，这时手工合并。确认以合并文件为准才加 `--force`；确认放弃合并文件的修改时，用 `merge . --force`，它会先备份。
+
 ## 书前书后
 
 按书的需要补上，放进 `zh/`（文件名靠前或靠后排序）：
 
 - 原书的序言、致谢、作者说明都要译；
-- 需要时加"译者说明"或"读者说明"：讲清底本版本、术语原则、`【原文待核】` 的含义、暂译人名表；
+- 需要时加"译者说明"：讲清底本版本、术语原则、`【原文待核】` 的含义、暂译人名表。单独成一个文件，一级标题就写 `# 译者说明`，这样阅读版会自动去掉它；
 - 索引：页码变了，原书索引不能直接用，默认不翻。用户要的话再单独做。
 
-`project.json` 的 `build.edition_note` 是版权页（阅读说明页）上的一段话，要如实写：用了什么底本、AI 翻译加哪些人工校对。原书版权归原作者及权利方所有。这个 skill 只负责做书，要不要分发、能不能分发由用户决定，不要替用户公开发布。
+`project.json` 的 `build.edition_note` 是完整版版权页（阅读说明页）上的一段话，要如实写：用了什么底本、AI 翻译加哪些人工校对。原书版权归原作者及权利方所有。这个 skill 只负责做书，要不要分发、能不能分发由用户决定，不要替用户公开发布。
 
 ## 封面
 
@@ -54,7 +79,7 @@ python <skill>/scripts/booktool.py audit-check . --final
 4. 和原封面并排对比：图像有没有被改掉，有没有残留外文，文字有没有挡住重要画面。
 5. **逐字检查生成结果。** 生图模型很容易写错汉字，放大看每一个字。有错字就重新生成。两三次还不对，就让模型只去掉文字、补全背景，再用 HTML 把中文排上去（`cover.html` 的写法见方式二）。
 6. **核对比例。** 封面图会铺满页面，比例不一致就会被裁掉边缘。原封面的比例常常和默认的 160:230 不同，可以把 `project.json` 里的 `build.page_width_mm`、`page_height_mm` 改成和原书一致，或者生成时按页面比例补足画面。
-7. 定稿存为 `cover/cover.png`（或 `.jpg`），提示词留在 `cover/prompt.md`。可选封底 `cover/back.png`。
+7. 定稿存为 `cover/cover.png`（或 `.jpg`），提示词留在 `cover/prompt.md`。
 
 ### 方式二：重新设计（模型手搓，不用生图模型）
 
@@ -86,13 +111,56 @@ python <skill>/scripts/booktool.py audit-check . --final
 
 脚本取封面的优先级：`cover/cover.html` → `cover/cover.png|jpg|jpeg|webp` → 自动排一个纯文字封面。所以封面没好时也能先出 PDF 看版面。自动文字封面会显示 `project.json` 里的书名、副标题和作者。
 
-## 合成 PDF
+## 封底
+
+封底和封面一样要做，放在两份 PDF 的最后一页。
+
+**用什么做：**
+
+- 封面是汉化的，并且有原封底（放到 `cover/original-back.*`）：同样用生图模型汉化，步骤同方式一，定稿存为 `cover/back.png`。
+- 其他情况（重新设计，或者没有原封底）：模型手搓，不调用生图模型，写成 `cover/back.html`。配色和字体要和封面呼应，看起来是一本书的两面。
+
+**写什么：**
+
+- 内容简介，150–300 字。原封底有简介就翻译它；没有就根据译稿写，只写书里确实有的内容。
+- 可选：作者简介（只用查证过的信息）、原书名和原作者。
+- 原封底上的推荐语照实翻译，并保留署名。**不要编造推荐语、奖项和销量。**
+- 不要放条码、ISBN、定价和出版社标志。这些原书的信息不属于这个译本，也不要编造新的。
+
+写法和封面的 `cover.html` 相同，只是最外层换成下面这样。样式都写在 `#back-cover` 下面：
+
+```html
+<section class="cover-page back-cover" id="back-cover">
+  <style>
+    #back-cover{container-type:inline-size;background:#162e3b;color:#f3ecdf}
+    #back-cover .b-text{position:absolute;left:12%;right:12%;top:14%;font:400 3.5cqw/1.9 var(--serif)}
+    #back-cover .b-text p{margin:0 0 1em;text-align:justify}
+    #back-cover .b-meta{position:absolute;left:12%;right:12%;bottom:8%;font:500 2.8cqw/1.6 var(--sans);opacity:.8}
+  </style>
+  <div class="b-text"><p>内容简介……</p></div>
+  <div class="b-meta">原书名：…… · 原作者：……</div>
+</section>
+```
+
+脚本取封底的优先级：`cover/back.html` → `cover/back.png|jpg|jpeg|webp`。没有封底也能出书，但 `validation` 的 `warnings` 会提醒。封底的每个字同样要核对，事实要能在书里找到依据。
+
+## 合成两份 PDF
+
+默认交付两份 PDF：
+
+| 版本 | 文件 | 内容 |
+| --- | --- | --- |
+| 完整版 | `build/<书名>.pdf` | 带版权页、译者说明、注释、注号和 `【原文待核】`，用来查证和校对 |
+| 无注释纯阅读版 | `build/<书名>_阅读版.pdf` | 只留封面、目录、作者的正文和封底。版权页、译者说明、注释、注号和待核标记全部去掉，目录页码重排 |
+
+两份都带封面和封底，也各有一份 HTML。
 
 依赖：Node.js 22+，`marked`、`playwright`，Python 的 `pypdf`、`fonttools`、`brotli`，以及本机的 Chrome 或 Edge（不必下载 Playwright 自带的浏览器）。脚本会分别去找装了 `pypdf` 和 `fonttools` 的 Python，两者不必在同一个环境。
 
 ```bash
-node <skill>/scripts/build_book.mjs .
-node <skill>/scripts/build_book.mjs . --reading    # 无引注阅读版
+node <skill>/scripts/build_book.mjs .             # 两份都出
+node <skill>/scripts/build_book.mjs . --full      # 只出完整版，调版面时省时间
+node <skill>/scripts/build_book.mjs . --reading   # 只出阅读版
 ```
 
 **不用预先检查依赖，直接跑。** 脚本自己找：Node 包依次看项目目录、`NODE_PATH`、脚本目录、Codex 运行环境；Python 依次看 `PYTHON`、Codex 运行环境、`py -3`、`python3`、`python`。所以 `py -3` 里没有 `pypdf` 不代表跑不了。真缺什么，脚本会说，这时再装，**装到项目目录，不要写 skill 目录**：
@@ -104,7 +172,13 @@ python -m pip install -r <skill>/scripts/requirements.txt
 
 环境变量：`BROWSER_PATH`（浏览器路径）、`PYTHON`（Python 路径）、`NODE_PATH`、`CODEX_RUNTIME_DIR`（Codex 运行环境目录）、`BOOK_FONT_DIR`（字体目录）。实际用了哪份依赖记录在 `validation.json` 的 `environment`。
 
-输出到 `build/`：PDF、单文件 HTML、`validation.json`。阅读版文件名带"阅读版"。
+输出到 `build/`：每个版本一份 PDF、一份单文件 HTML 和一个校验文件（`validation.json`、`validation_阅读版.json`）。**两个校验文件都要通过。** 只用 `--full` 或 `--reading` 调试之后，交付前要再跑一遍默认命令。
+
+**阅读版的注意事项：**
+
+- **译者说明怎么去掉：** 标题完全等于“译者说明”“译者前言”“译者的话”“译后记”“翻译说明”“校注说明”等的文件会自动去掉；作者自己写的“读者说明”“序言”不受影响。其他只给校对看的文件（比如暂译人名表），把文件名前缀或标题写进 `project.json` 的 `build.reading_exclude`。实际去掉了哪些，记在 `validation_阅读版.json` 的 `readingExcluded`，要看一眼对不对。
+- 正文里提到注释或译者说明的话（比如“见注 3”）在阅读版里会落空。脚本会在 `warnings` 里列出来，要把译文改成不依赖它们的说法。
+- 阅读版里完全看不出这是 AI 译本、哪些引文还没落实。所以交付说明里要写明这一点和待核数量，让用户决定是否现在就发阅读版。
 
 脚本会做的事：排版、循环到目录页码稳定（最多 4 轮）、加书签和元数据、回读校验（页数、书签、字体是否全部嵌入、有无替换字符和空白页、注释链接是否有效、每章抽 3 段核对是否进了 PDF）。这只是抽样，**不等于逐字核对正文**。校验不过会报错，不要绕过，先解决。
 
@@ -118,17 +192,17 @@ python -m pip install -r <skill>/scripts/requirements.txt
 
 ## 目视检查
 
-脚本查不出版面难看的问题。用能把 PDF 转成图片的工具（`pdftoppm`、`pypdfium2`）或直接在浏览器里打开，至少看：封面、目录、版权页、一章的开头、一页正文、一页注释、最后一页。重点看：孤行和孤页、字距被拉散的行（括注外文时常见）、表格溢出、图片、标题落在页底、封面是否铺满。版面问题改 CSS（复制 `book.css` 到项目里调），不要为了版面改译文。
+脚本查不出版面难看的问题。用能把 PDF 转成图片的工具（`pdftoppm`、`pypdfium2`）或直接在浏览器里打开，两份 PDF 都要看。完整版至少看：封面、目录、版权页、一章的开头、一页正文、一页注释、封底。阅读版至少看：封面后面紧接着是不是目录、一章的开头、一页正文、封底。重点看：孤行和孤页、字距被拉散的行（括注外文时常见）、表格溢出、图片、标题落在页底、封面是否铺满。版面问题改 CSS（复制 `book.css` 到项目里调），不要为了版面改译文。
 
 如实把看了哪些页写进交付说明。
 
 ## 其他成品
 
-用户要 EPUB、TXT 时按项目写一个脚本，从 `zh/` 生成，去掉锚点，并回读校验正文和注释都进了成品。阅读版去掉注释和待核标记后，版权页要说明省略了什么。
+用户要 EPUB、TXT 时按项目写一个脚本，从 `zh/` 生成，去掉锚点，并回读校验正文和注释都进了成品。阅读版同样去掉版权页、译者说明、注释和待核标记。
 
 ## 完成标准
 
-- `validation.json` 通过；
+- 完整版和阅读版两份 PDF 都已生成，两个校验文件都通过；
 - 目视检查过，没有明显问题；
-- 封面每个字都核过；
-- 交付说明写明页数、章数、待核数量、核对范围和还需要用户做的事。
+- 封面和封底每个字都核过，封底的内容能在书里找到依据；
+- 交付说明写明两份 PDF 各自的页数、章数、待核数量、核对范围和还需要用户做的事。

@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
+import hashlib
 import json
+import os
 import re
 import statistics
 import sys
@@ -187,7 +190,7 @@ def cmd_init(args):
     if (root / "project.json").exists():
         print(f"{root} 已有 project.json，没有改动。", file=sys.stderr)
         return 2
-    for sub in ["source/original", "source/chapters", "source/images", "glossary", "zh", "audit/rounds",
+    for sub in ["source/original", "source/chapters", "source/images", "glossary", "zh", "zh_merged", "audit/rounds",
                 "audit/sources", "polish", "cover", "build", "logs"]:
         (root / sub).mkdir(parents=True, exist_ok=True)
     write_json(root / "project.json", {
@@ -197,7 +200,7 @@ def cmd_init(args):
         "edition": "", "user_preferences": [], "editorial_rules": [],
         "progress": {"stage": "source", "translated_chapters": [], "polished_chapters": [], "next": ""},
         "build": {"running_head": args.title_zh or args.title, "page_width_mm": 160, "page_height_mm": 230,
-                  "edition_note": "", "output_name": args.title_zh or args.title},
+                  "edition_note": "", "reading_exclude": [], "output_name": args.title_zh or args.title},
     })
     with open(root / "glossary" / "glossary.csv", "w", encoding="utf-8", newline="") as handle:
         csv.writer(handle).writerow(GLOSSARY_COLUMNS)
@@ -876,6 +879,126 @@ def cmd_polish_check(args):
     return report.show(args.limit, args.json)
 
 
+# ---------- 合并中文 MD ----------
+
+MERGED_DIR = "zh_merged"
+MERGED_NAME = "book_zh.md"
+MERGE_STATE = ".merge-state.json"
+FILE_MARK_RE = re.compile(r"^<!--file:([^>\n]+?\.md)-->[ \t]*$", re.M)
+MERGED_HEADER = ("<!-- 全书中文 MD，由 zh/ 的逐章文件合并而成，可以直接修改。改完运行 unmerge 写回逐章文件。"
+                 "不要改动 file 标记和 b 开头的段落锚点。 -->\n")
+
+
+def sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def clean_chapter(text):
+    return text.strip("\n") + "\n"
+
+
+def render_merged(root):
+    chapters = {p.name: clean_chapter(read_text(p)) for p in chapter_files(Path(root) / "zh")}
+    parts = [f"<!--file:{name}-->\n{text}" for name, text in chapters.items()]
+    return MERGED_HEADER + "\n" + "\n".join(parts), chapters
+
+
+def load_merge_state(root):
+    path = Path(root) / MERGED_DIR / MERGE_STATE
+    return json.loads(read_text(path)) if path.exists() else {}
+
+
+def save_merged(root, text, chapters):
+    folder = Path(root) / MERGED_DIR
+    folder.mkdir(exist_ok=True)
+    (folder / MERGED_NAME).write_text(text, encoding="utf-8", newline="\n")
+    write_json(folder / MERGE_STATE, {
+        "merged": sha(text), "chapters": {name: sha(body) for name, body in chapters.items()}})
+
+
+def merged_status(root):
+    """返回 missing（未合并）、current（与逐章一致）、stale（逐章较新）或 edited（合并文件有人工修改）。"""
+    path = Path(root) / MERGED_DIR / MERGED_NAME
+    if not path.exists():
+        return "missing"
+    current = read_text(path)
+    rendered, _ = render_merged(root)
+    if current == rendered:
+        return "current"
+    return "stale" if sha(current) == load_merge_state(root).get("merged") else "edited"
+
+
+def cmd_merge(args):
+    root = Path(args.project)
+    rendered, chapters = render_merged(root)
+    if not chapters:
+        print("zh/ 里没有章节。", file=sys.stderr)
+        return 2
+    path = root / MERGED_DIR / MERGED_NAME
+    if merged_status(root) == "edited":
+        if not args.force:
+            print(f"{path} 有人工修改还没写回 zh/。先运行 unmerge；要放弃这些修改请加 --force（会先备份）。", file=sys.stderr)
+            return 1
+        backup = path.with_name(f"book_zh.bak-{datetime.now():%Y%m%d-%H%M%S}.md")
+        backup.write_text(read_text(path), encoding="utf-8", newline="\n")
+        print(f"已备份原合并文件：{backup}")
+    save_merged(root, rendered, chapters)
+    print(f"已合并 {len(chapters)} 章：{path}")
+    return 0
+
+
+def cmd_unmerge(args):
+    root = Path(args.project)
+    path = root / MERGED_DIR / MERGED_NAME
+    if not path.exists():
+        print(f"找不到 {path}，先运行 merge。", file=sys.stderr)
+        return 2
+    text = read_text(path)
+    marks = list(FILE_MARK_RE.finditer(text))
+    report = Report()
+    leading = re.sub(r"<!--.*?-->", "", text[:marks[0].start()] if marks else text, flags=re.S).strip()
+    if leading or not marks:
+        report.error(MERGED_NAME, "第一个 file 标记之前有正文，或者找不到 file 标记")
+    sections = OrderedDict()
+    for i, mark in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(text)
+        name = mark.group(1).strip()
+        if name in sections:
+            report.error(name, "file 标记重复")
+        sections[name] = clean_chapter(text[mark.end():end])
+    existing = {p.name: clean_chapter(read_text(p)) for p in chapter_files(root / "zh")}
+    for name in sorted(set(existing) - set(sections)):
+        report.error(name, "合并文件里缺少这一章的 file 标记")
+    for name in sorted(set(sections) - set(existing)):
+        report.error(name, "zh/ 里没有这个文件，file 标记可能被改过")
+    base = load_merge_state(root).get("chapters", {})
+    to_write, kept = [], []
+    for name, new in sections.items():
+        current = existing.get(name)
+        if current is None or new == current:
+            continue
+        merged_changed = sha(new) != base.get(name)
+        chapter_changed = sha(current) != base.get(name)
+        if merged_changed and chapter_changed and not args.force:
+            report.error(name, "合并文件和逐章文件都改过，需要手工合并；确认以合并文件为准请加 --force")
+        elif merged_changed:
+            to_write.append(name)
+        else:
+            kept.append(name)
+    if report.errors:
+        print("没有写入任何文件。")
+        return report.show()
+    for name in to_write:
+        (root / "zh" / name).write_text(sections[name], encoding="utf-8", newline="\n")
+    rendered, chapters = render_merged(root)
+    save_merged(root, rendered, chapters)
+    print(f"写回 {len(to_write)} 章" + (f"：{', '.join(to_write)}" if to_write else ""))
+    if kept:
+        print("这些章的逐章文件较新，已保留：" + ", ".join(kept))
+    print("接着运行 check 和 audit-check，再重新合成。")
+    return 0
+
+
 # ---------- 进度 ----------
 
 def cmd_status(args):
@@ -897,6 +1020,7 @@ def cmd_status(args):
     audit = Counter(r.get("status") for r in records)
     progress = project.get("progress", {})
     covers = [p.name for p in (root / "cover").glob("cover.*")] if (root / "cover").exists() else []
+    backs = [p.name for p in (root / "cover").glob("back.*")] if (root / "cover").exists() else []
     source_names = {p.name.split("_")[0] for p in sources}
     polished = {str(c).split("_")[0] for c in progress.get("polished_chapters", [])} & source_names
     builds = [p.name for p in (root / "build").glob("*.pdf")] if (root / "build").exists() else []
@@ -907,7 +1031,13 @@ def cmd_status(args):
     print(f"已译完：{len(translated)} 章；未译完：{len(partial)} 章" + (f"（{'; '.join(partial[:6])}）" if partial else ""))
     print(f"引文台账：{len(records)} 条" + ("（" + "，".join(f"{k} {v}" for k, v in audit.items()) + "）" if records else "") + f"，第 {ledger.get('round', 0)} 轮")
     print(f"已润色：{len(polished)} 章（来自 project.json 的 progress.polished_chapters）")
-    print("封面：" + (", ".join(covers) or "无（合成时用自动文字封面）") + "；PDF：" + (", ".join(builds) or "无"))
+    merged = merged_status(root) if chapter_files(root / "zh") else "missing"
+    print("合并 MD：" + {"missing": "未生成", "current": f"{MERGED_DIR}/{MERGED_NAME}，与逐章文件一致",
+                       "stale": f"{MERGED_DIR}/{MERGED_NAME}，逐章文件较新，合成时会自动更新",
+                       "edited": f"{MERGED_DIR}/{MERGED_NAME}，有人工修改还没写回"}[merged])
+    print("封面：" + (", ".join(covers) or "无（合成时用自动文字封面）") + "；封底：" + (", ".join(backs) or "无"))
+    print("PDF：" + (", ".join(builds) or "无"))
+    both_built = any(n.endswith("_阅读版.pdf") for n in builds) and any(not n.endswith("_阅读版.pdf") for n in builds)
     if len(sources) == 0:
         step = "整理原文 MD 并拆章（references/source-md.md）"
     elif not glossary:
@@ -918,10 +1048,12 @@ def cmd_status(args):
         step = "引文核查（references/citation-audit.md）。没有引文的书运行 audit-scan 后把台账 round 设为 1 即可跳过"
     elif len(polished) < len(sources):
         step = "润色（references/polish.md）"
-    elif not builds or not covers:
-        step = "封面与合成（references/assembly.md）"
+    elif not covers or not backs or not both_built:
+        step = "封面、封底与合成，要出完整版和阅读版两份 PDF（references/assembly.md）"
     else:
-        step = "看 build/validation.json，目视检查后交付（references/assembly.md）"
+        step = "看 build/ 里的两个 validation 文件，目视检查后交付（references/assembly.md）"
+    if merged == "edited":
+        step = "合并 MD 有人工修改，先运行 unmerge 写回 zh/"
     print(f"建议下一步：{step}")
     if progress.get("next"):
         print(f"上次记录的下一步：{progress['next']}")
@@ -1002,13 +1134,31 @@ def build_parser():
     p.add_argument("--protect-quotes", action="store_true", help="引号内文字不许变（学术书用）")
     common(p)
 
+    p = add("merge", cmd_merge, "把 zh/ 合并成全书中文 MD")
+    p.add_argument("project")
+    p.add_argument("--force", action="store_true", help="放弃合并文件里的人工修改（会先备份）")
+
+    p = add("unmerge", cmd_unmerge, "把全书中文 MD 的修改写回 zh/")
+    p.add_argument("project")
+    p.add_argument("--force", action="store_true", help="两边都改过时以合并文件为准")
+
     add("status", cmd_status, "项目进度").add_argument("project")
     return parser
 
 
 def main():
     args = build_parser().parse_args()
-    return args.func(args)
+    try:
+        code = args.func(args)
+        sys.stdout.flush()
+        return code
+    except OSError as err:
+        # 输出被 head 等提前关闭。Windows 上报的是 EINVAL，不是 BrokenPipeError。
+        # 文件操作的 OSError 带文件名，照常抛出。
+        if not isinstance(err, BrokenPipeError) and (err.errno != errno.EINVAL or err.filename is not None):
+            raise
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 141  # 结果被截断，不能当作通过
 
 
 if __name__ == "__main__":

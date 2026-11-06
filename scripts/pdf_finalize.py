@@ -90,7 +90,8 @@ def finalize(source, target, config_path):
     writer.clone_document_from_reader(reader)
     writer.root_object.pop(NameObject("/Outlines"), None)
     for entry in config["outline"]:
-        writer.add_outline_item(entry["title"], entry["page"] - 1)
+        page = entry["page"]  # 负数表示从末尾数，封底用 -1
+        writer.add_outline_item(entry["title"], page - 1 if page > 0 else len(reader.pages) + page)
     writer.add_metadata(config["metadata"])
     writer.root_object[NameObject("/PageMode")] = NameObject("/UseOutlines")
     with open(target, "wb") as stream:
@@ -108,7 +109,7 @@ def finalize(source, target, config_path):
     blank, sparse = [], []
     for number, text in enumerate(texts, 1):
         size = len(normalize(text))
-        if number == 1:  # 封面可能全是图
+        if number == 1 or (config.get("hasBackCover") and number == len(texts)):  # 封面和封底可能全是图
             continue
         has_image = bool(final.pages[number - 1].images) if size == 0 else False
         if size == 0 and not has_image:
