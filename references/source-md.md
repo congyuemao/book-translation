@@ -9,7 +9,8 @@
 | 带文字层的 PDF | 抽取文字，再清理换行、页眉页脚、连字符 |
 | 用户给的 OCR 结果 | 以它为底稿，对照页面图片修正 |
 | 只有扫描页，没有 OCR | 把页面当图片读，分批转写。先告诉用户这样更慢、更贵，问题页也更多 |
-| EPUB / HTML | 按结构解析，不要按版面抽文字。保留强调、列表、链接、对齐和分隔符，并统计块数，确保每个块都进了 MD |
+| EPUB | 用 `scripts/epub2md.py` 按结构转换（见下），保留强调、列表、引文块和原书页码 |
+| HTML | 按结构解析，不要按版面抽文字。保留强调、列表、链接、对齐和分隔符，并统计块数，确保每个块都进了 MD |
 | TXT | 直接整理，章节边界靠人工判断 |
 
 ## 输出格式
@@ -33,6 +34,19 @@ The land reform began in the north.[1] It spread unevenly...
 ## Notes
 
 1. W. Hinton, *Fanshen*, New York, 1966, p.12.
+```
+
+### EPUB 用脚本转
+
+```bash
+python <skill>/scripts/epub2md.py convert book.epub source/book.md --list      # 先看 spine 里有哪些文件
+python <skill>/scripts/epub2md.py convert book.epub source/book.md --skip "(?i)(cover|title|copyright|contents)\.x?html$"
+```
+
+它按 spine 顺序把每个文件转成一章，带上原书页码（EPUB 里有 pagebreak 标记时），注号转成 `[n]`。尾注要自己挪到每章末的 `## Notes` 下，脚本会报数量。整理完、拆好章之后，回头逐词比对一遍，确认人工整理时没丢段落（`--skip` 和转换时一样）：
+
+```bash
+python <skill>/scripts/epub2md.py check book.epub source/chapters --skip "(?i)(cover|title|copyright|contents)\.x?html$"
 ```
 
 ## 拆章和加锚点
@@ -66,7 +80,7 @@ python <skill>/scripts/booktool.py split source/book.md --out source/chapters
    - 存疑：p.51 脚注 4 页面污损，"1953" 或 "1958"，待用户看纸本
    ```
 
-**没有原书可对时**（只有 TXT、EPUB、HTML）：把 MD 和底本文件对读或比对块数，写明"未与纸本或页图核对"。这种情况没有页码，锚点不带 `p.` 也可以。
+**没有原书可对时**（只有 TXT、EPUB、HTML）：把 MD 和底本文件对读或比对块数（EPUB 用 `epub2md.py check` 逐词比），写明"未与纸本或页图核对"。没有页码时锚点不带 `p.` 也可以，但以后就没法按原书页码做索引。
 
 用户如果想亲自核对，就把核对清单交给用户，不要代为声称已核对。
 

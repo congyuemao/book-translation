@@ -37,6 +37,8 @@ git clone https://github.com/congyuemao/book-translation.git ~/.codex/skills/boo
 - `scripts/booktool.py`（校验、台账、进度）：Python 3 标准库。其中 `inspect` 需要 `pypdf`。
 - `scripts/build_book.mjs`（合成 PDF）：Node.js 22+、`marked`、`playwright`、Python 的 `pypdf`，以及本机的 Chrome 或 Edge。
 - 字体子集（可选，建议安装）：`fonttools`、`brotli`，以及 Noto Serif SC 和 Noto Sans SC。没有的话也能出书，但 PDF 里部分汉字的复制和搜索可能对不上。
+- `scripts/epub2md.py`（EPUB 转 MD）、`scripts/polish_tool.py`（逐段润色）、`scripts/notes_tool.py`（插注删注）、`scripts/diff_review.py`（改动对照页）、`scripts/md_export.py`（导出全书 MD）、`scripts/corpus.py`（本地引文语料）：Python 3 标准库；`corpus.py pdf` 需要 `pypdf`。
+- `scripts/index_tool.py`（重做索引）：`pypdf`。`scripts/pdf_sheet.py`（缩略图拼页）：`pypdfium2`、`Pillow`。`scripts/halftone.py`（封面照片网点化）：`numpy`、`Pillow`。`scripts/cover_preview.mjs`（封面预览）：`playwright` 和本机的 Chrome 或 Edge。
 
 不用提前检查依赖，直接运行即可，缺什么脚本会提示。安装方法见 [references/assembly.md](references/assembly.md)。
 
@@ -44,7 +46,7 @@ git clone https://github.com/congyuemao/book-translation.git ~/.codex/skills/boo
 
 脚本只保证不漏、不乱、不矛盾：段落对应、注释编号、数字、术语、引文台账和版面基本项。它判断不了译得好不好，也不能替代人工校对。
 
-目前已经用样书和一部 300 多页译稿的合成测试过脚本。还没有用它从头翻译过一整本长书，生图模型汉化封面和 OCR 输入也没有实际测试。
+生图模型汉化封面和 OCR 输入还没有实际测试。
 
 ## 版权
 
