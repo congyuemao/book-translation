@@ -174,7 +174,23 @@ function renderChapter(c) {
   let prose = parts[0];
   let notesHtml = '';
   if (reading) {
-    prose = prose.replace(NOTE_REF, '').replaceAll(PENDING, '');
+    // 阅读版只留标了 <!--读者--> 的注释（或用 <!--读者：替代文字--> 给出阅读版的说法），按出现顺序重新编号；其余注号删去。
+    const keep = new Map();
+    if (parts.length === 2) {
+      for (const m of parts[1].matchAll(/^(\d+)\.\s+(.*)$/gm)) {
+        const alt = m[2].match(/<!--\s*读者[:：]\s*([\s\S]*?)-->/);
+        if (alt || /<!--\s*读者\s*-->/.test(m[2])) keep.set(m[1], (alt ? alt[1] : m[2]).replace(/<!--[\s\S]*?-->/g, '').trim());
+      }
+    }
+    for (const pattern of build.reading_strip || []) prose = prose.replace(new RegExp(pattern, 'g'), '');
+    const kept = [];
+    prose = prose.replace(NOTE_REF, (match, a, b) => {
+      const text = keep.get(a || b);
+      if (text === undefined) return '';
+      kept.push(text);
+      return `⁠<a class="note-ref" id="ref-${c.id}-${kept.length}" href="#note-${c.id}-${kept.length}">[${kept.length}]</a>`;
+    }).replaceAll(PENDING, '');
+    if (kept.length) notesHtml = `<section class="endnotes" aria-label="注释"><h2>注释</h2><ol>${kept.map((t, i) => `<li id="note-${c.id}-${i + 1}">${marked.parseInline(t)}</li>`).join('')}</ol></section>`;
     for (const m of prose.matchAll(/[见参]注\s*\d+|注释\s*\d+|第\s*\d+\s*条注|译者说明|校注/g)) noteCrossRefs.push(`${c.file}：${m[0]}`);
   } else {
     prose = prose.replace(NOTE_REF, (match, a, b) => `\u2060<a class="note-ref" id="ref-${c.id}-${a || b}" href="#note-${c.id}-${a || b}">[${a || b}]</a>`);
@@ -238,7 +254,7 @@ const title = project.title_zh || project.title_source;
 const defaultNote = `正文或注释中的“${PENDING}”表示该处引文或出处尚未落实。`;
 const editionSection = `<section class="edition-page" id="edition"><h1>${escapeHtml(title)}</h1>${project.subtitle_zh ? `<p class="edition-meta">${escapeHtml(project.subtitle_zh)}</p>` : ''}<div class="edition-rule"></div>
 <p class="edition-meta">${escapeHtml(project.title_source || '')}${project.author_source ? ' · ' + escapeHtml(project.author_source) : ''}</p>
-<p>${escapeHtml(build.edition_note || '')}</p><p>${escapeHtml(defaultNote)}</p><p>原书版权归原作者及权利方所有。</p></section>`;
+<p>${escapeHtml(build.edition_note || '')}</p>${pendingTotal ? `<p>${escapeHtml(defaultNote)}</p>` : ''}<p>原书版权归原作者及权利方所有。</p></section>`;
 
 function makeHtml(pageMap) {
   const toc = chapters.map(c => `<li><a href="#${c.id}"><span class="toc-title">${c.number ? `<span class="toc-number">${escapeHtml(c.number)}</span>` : ''}${escapeHtml(c.shortTitle)}</span><span class="toc-pg">${pageMap?.[c.id] ?? ''}</span></a></li>`).join('');
@@ -251,7 +267,7 @@ function makeHtml(pageMap) {
 .cover-page{width:${w}mm;height:${h}mm}`;
   return `<!doctype html><html lang="zh-Hans"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><style>${fontCss}\n${css}\n${pageCss}</style></head><body><main id="book">
 ${coverSection}${reading ? '' : editionSection}
-<section class="toc-page" id="book-toc"><h1>目录</h1><ol>${toc}</ol></section>
+<section class="toc-page" id="book-toc"><h1>目录</h1><ol>${toc}</ol>${reading && build.reading_note ? `<p class="reading-note">${escapeHtml(build.reading_note)}</p>` : ''}</section>
 ${renderedChapters.join('\n')}
 ${backSection}</main></body></html>`;
 }
@@ -349,8 +365,8 @@ try {
   if (!reading && dom.noteRefs !== dom.endnotes) problems.push(`注号 ${dom.noteRefs} 个，注释 ${dom.endnotes} 条`);
   if (!reading && dom.pendingMarkers !== pendingTotal) problems.push('HTML 中的待核标记数量不对');
   if (reading && report.pendingMarkersInPdf) problems.push('阅读版里还有待核标记');
-  if (reading && dom.endnotes) problems.push('阅读版里还有注释');
-  if (reading && dom.residualRefs) problems.push(`阅读版正文还有 ${dom.residualRefs} 处注号`);
+  if (reading && dom.noteRefs !== dom.endnotes) problems.push(`阅读版注号 ${dom.noteRefs} 个，注释 ${dom.endnotes} 条`);
+  if (reading && dom.residualRefs !== dom.noteRefs) problems.push(`阅读版正文还有 ${dom.residualRefs - dom.noteRefs} 处多余的注号`);
   await page.emulateMedia({ media: 'screen' });
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
