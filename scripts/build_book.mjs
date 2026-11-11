@@ -202,6 +202,14 @@ function renderChapter(c) {
     }
   }
   let body = marked.parse(prose);
+  // 正文插图：相对路径依次在 zh/、source/、项目根目录下找，转成内嵌数据，PDF 和单文件 HTML 都带图
+  body = body.replace(/<img src="([^"]+)"/g, (m, src) => {
+    if (/^(data:|https?:)/.test(src)) return m;
+    const rel = decodeURI(src);
+    const file = [zhDir, path.join(root, 'source'), root].map(d => path.join(d, rel)).find(p => fs.existsSync(p));
+    if (!file) fail(`${c.file ?? c.id}：找不到正文插图 ${src}（在 zh/、source/、项目根目录下都没有）`);
+    return `<img src="${imageData(file)}"`;
+  });
   if (!reading) body = body.replaceAll(PENDING, `<span class="editor-note">${PENDING}</span>`);
   body = body.replace(/<p>(?:✦|\*\s*\*\s*\*|\*\*\*)<\/p>/g, '<div class="section-break" aria-hidden="true">✦</div>');
   // 抽样记下正文段，供 PDF 回读比对

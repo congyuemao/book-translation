@@ -190,6 +190,8 @@ python <skill>/scripts/halftone.py cover/src/photo.jpg cover/src/photo_duo.png -
 
 两份都带封面和封底，也各有一份 HTML。
 
+正文插图在译文里写成 `![图注](images/fig1.png)`，路径相对 `zh/`、`source/` 或项目根目录都可以（脚本依次找）。合成时图片会内嵌进 PDF 和单文件 HTML，找不到图就报错停下。
+
 依赖：Node.js 22+，`marked`、`playwright`，Python 的 `pypdf`、`fonttools`、`brotli`，以及本机的 Chrome 或 Edge（不必下载 Playwright 自带的浏览器）。脚本会分别去找装了 `pypdf` 和 `fonttools` 的 Python，两者不必在同一个环境。
 
 ```bash
