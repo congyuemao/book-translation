@@ -6,6 +6,10 @@
 }
 *{box-sizing:border-box}
 html{color:var(--text);font-family:var(--serif);font-size:10.5pt;line-height:1.82}
+/* Chrome 157 起行尾标点默认压缩，句末“。）”这类会悬出版心，导致整本 PDF 被缩小；关掉压缩 */
+html{text-spacing-trim:space-all}
+/* 带网址的段落和注释左对齐，免得长网址换行后上一行被两端对齐撑开 */
+.chapter-body p:has(a[href^="http"]),.endnotes li:has(a[href^="http"]){text-align:left}
 body{margin:0;background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 a{color:inherit;text-decoration:none}
 p{margin:0 0 .8em;text-align:justify;widows:2;orphans:2}
