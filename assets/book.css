@@ -52,6 +52,9 @@ strong,b{font-weight:750}
 .chapter-body ol,.chapter-body ul{padding-left:1.7em}
 .chapter-body li{margin-bottom:.45em;overflow-wrap:anywhere}
 .chapter-body blockquote{margin:5mm 0;padding-left:5mm;border-left:.7mm solid var(--line)}
+/* 引文块左边的竖线逐行画：框跨页时，前一截会撑到页底，整框画线就会探下去；改成每行字各画一段，字排到哪里线就到哪里 */
+.chapter-body blockquote{border-left:none;padding-left:0;widows:1;orphans:1}
+.chapter-body blockquote p{display:inline;margin:0;border-left:.7mm solid var(--line);padding:0 0 .82em 5mm;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .chapter-body table{border-collapse:collapse;width:100%;font-size:9pt}
 .chapter-body th,.chapter-body td{padding:2mm;border-bottom:.2mm solid var(--line)}
 .chapter-body img{max-width:100%;height:auto}
